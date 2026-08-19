@@ -13,6 +13,8 @@ See [NOTICE.md](NOTICE.md).
 - Platform super-admin can create gyms and assign owners
 - Instance branding via `APP_NAME` / `DEFAULT_LANG`; guest mode off by default
 - Capacitor iOS/Android shells that load the hosted instance
+- Email + password sign-in (passkeys stay as an optional extra); gym owners can set a member's password
+- Gym owners can pick a memorable join code (letters, numbers, hyphens) instead of only random hex
 
 ### Fixes
 

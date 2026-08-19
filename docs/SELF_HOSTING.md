@@ -100,12 +100,12 @@ INVITE_ONLY=1              # new profiles need an invite code
 ALLOW_GUEST=0              # remove "Continue without account"
 ```
 
-Register your own passkey profile first, then find your id in `./data/db.json` under `users[].id`
-and put it in `ADMIN_UIDS`. You'll get an **Admin dashboard** link in Settings: who's training
-right now, each user's workout history and body weight, the ability to disable an account (signed
-out and locked out everywhere until you re-enable it), and — with `INVITE_ONLY=1` — generating and
-revoking invite codes. Existing accounts keep working when you switch invite-only on. Admin access
-is gated by your passkey and enforced server-side, so it needs no separate login.
+Register your own profile first (email + password; a passkey is optional), then find your id in
+`./data/db.json` under `users[].id` and put it in `ADMIN_UIDS`. You'll get a **Platform** link in
+Settings: gyms and owners. Gym owners see members, can set a join code members type at signup
+(default random hex, or a word like `PALERMO`), and can set a member's password. Existing
+accounts keep working when you switch invite-only on. Admin access is gated by the same session
+cookie as everyone else and enforced server-side.
 
 `INVITE_ONLY=1` and `ALLOW_GUEST=0` answer different questions and are usually set together.
 Invite-only controls who may *create a profile*; it says nothing about the **Continue without

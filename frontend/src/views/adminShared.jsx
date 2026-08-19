@@ -50,6 +50,36 @@ function MembershipEditor({ user, onChanged }) {
   </div>
 }
 
+function SetPasswordCard({ user, onChanged }) {
+  const toast = useUI(s => s.toast)
+  const [email, setEmail] = useState(user.email || '')
+  const [password, setPassword] = useState('')
+  const [busy, setBusy] = useState(false)
+  const save = async () => {
+    if (!user.email && !email.trim()) { toast(t('Enter an email')); return }
+    if (password.length < 8) { toast(t('Password must be at least 8 characters')); return }
+    setBusy(true)
+    try {
+      await api('/api/admin/user/password', { method: 'POST', body: JSON.stringify({ id: user.id, password, email: email.trim() || undefined }) })
+      toast(t('Password set — they must sign in again'))
+      setPassword('')
+      onChanged()
+    } catch (e) { toast(e.message) }
+    finally { setBusy(false) }
+  }
+  return <div className="card" style={{ margin: '10px 0 12px', textAlign: 'left' }}>
+    <h4 className="sec" style={{ marginTop: 0 }}>{t('Set password')}</h4>
+    <div className="dim small" style={{ marginBottom: 8 }}>{user.email || t('No email yet — required for password login.')}</div>
+    {!user.email && <>
+      <input className="input" type="email" placeholder={t('Email for login')} value={email} onChange={e => setEmail(e.target.value)} />
+      <div style={{ height: 8 }} />
+    </>}
+    <input className="input" type="password" placeholder={t('Temporary password')} value={password} onChange={e => setPassword(e.target.value)} autoComplete="new-password" />
+    <div style={{ height: 8 }} />
+    <Button variant="primary" size="sm" disabled={busy} onClick={save}>{t('Set password')}</Button>
+  </div>
+}
+
 export function UserDetail({ id, onChanged, close, canBill, canRole }) {
   const nav = useNavigate()
   const [d, setD] = useState(null)
@@ -78,6 +108,7 @@ export function UserDetail({ id, onChanged, close, canBill, canRole }) {
       <div className="tile"><div className="l">{t('Routines')}</div><div className="v" style={{ fontSize: '1.1rem' }}>{d.routines.length}</div></div>
       <div className="tile"><div className="l">{t('Last sync')}</div><div className="v" style={{ fontSize: '.95rem' }}>{rel(d.lastSync)}</div></div>
     </div>
+    {canBill && <SetPasswordCard user={u} onChanged={() => { onChanged(); api('/api/admin/user?id=' + encodeURIComponent(u.id)).then(setD) }} />}
     {canRole && u.role !== 'owner' && <div style={{ margin: '8px 0', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
       <Button size="sm" onClick={() => api('/api/admin/user/role', { method: 'POST', body: JSON.stringify({ id: u.id, role: u.role === 'trainer' ? 'member' : 'trainer' }) }).then(() => { toast(t('Role updated')); onChanged(); api('/api/admin/user?id=' + encodeURIComponent(u.id)).then(setD) }).catch(e => toast(e.message))}>
         {u.role === 'trainer' ? t('Make member') : t('Make trainer')}

@@ -45,10 +45,18 @@ function credToJSON(cred) {
   }
   return out
 }
-export async function passkeyRegister(name, code) {
-  const { cid, options } = await api('/api/register/options', { method: 'POST', body: JSON.stringify({ name, code: code || '' }) })
+export async function registerAccount({ name, email, password, code }) {
+  const res = await api('/api/register', { method: 'POST', body: JSON.stringify({ name, email, password, code: code || '' }) })
+  return res.user
+}
+export async function loginAccount(email, password) {
+  const res = await api('/api/login', { method: 'POST', body: JSON.stringify({ email, password }) })
+  return res.user
+}
+export async function passkeyAttach() {
+  const { cid, options } = await api('/api/passkey/register/options', { method: 'POST', body: '{}' })
   const cred = await navigator.credentials.create({ publicKey: toCreationOptions(options) })
-  const res = await api('/api/register/verify', { method: 'POST', body: JSON.stringify({ cid, credential: credToJSON(cred) }) })
+  const res = await api('/api/passkey/register/verify', { method: 'POST', body: JSON.stringify({ cid, credential: credToJSON(cred) }) })
   return res.user
 }
 export async function passkeyLogin() {

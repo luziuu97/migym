@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {
   slugify, makeGym, findGymByJoinCode, publicGym, usersInGym,
   sameGym, migrateOrphans, staffOfGym, publicUser, setGymOwner, gymsWithOwners,
-  gymHasOwner,
+  gymHasOwner, normalizeJoinCode, validateJoinCode, applyJoinCode,
 } from './gyms.js'
 
 describe('slugify', () => {
@@ -147,5 +147,49 @@ describe('makeGym', () => {
     assert.equal(g.slug, 'box-palermo')
     assert.equal(g.joinCode, 'ABCD1234')
     assert.deepEqual(publicGym(g), { id: 'g1', name: 'Box Palermo', slug: 'box-palermo' })
+  })
+})
+
+describe('validateJoinCode', () => {
+  it('accepts a memorable owner-chosen code', () => {
+    assert.equal(validateJoinCode('  palermo  '), 'PALERMO')
+    assert.equal(validateJoinCode('iron-2026'), 'IRON-2026')
+  })
+  it('rejects too short, too long, or punctuation', () => {
+    assert.equal(validateJoinCode('ab'), null)
+    assert.equal(validateJoinCode('x'.repeat(25)), null)
+    assert.equal(validateJoinCode('hello!'), null)
+    assert.equal(validateJoinCode(''), null)
+  })
+})
+
+describe('applyJoinCode', () => {
+  it('sets a custom code when no other gym has it', () => {
+    const gyms = [{ id: 'g1', joinCode: 'AAAA1111' }, { id: 'g2', joinCode: 'BBBB2222' }]
+    const out = applyJoinCode(gyms, gyms[0], 'palermo')
+    assert.equal(out.ok, true)
+    assert.equal(out.joinCode, 'PALERMO')
+    assert.equal(gyms[0].joinCode, 'PALERMO')
+  })
+  it('refuses a code another gym already uses', () => {
+    const gyms = [{ id: 'g1', joinCode: 'PALERMO' }, { id: 'g2', joinCode: 'OTHER' }]
+    const out = applyJoinCode(gyms, gyms[1], 'palermo')
+    assert.equal(out.ok, false)
+    assert.equal(out.status, 409)
+    assert.equal(gyms[1].joinCode, 'OTHER')
+  })
+  it('regenerates an 8-hex code when the new value is empty', () => {
+    const gyms = [{ id: 'g1', joinCode: 'OLDCODE1' }]
+    const out = applyJoinCode(gyms, gyms[0], '')
+    assert.equal(out.ok, true)
+    assert.match(out.joinCode, /^[A-F0-9]{8}$/)
+    assert.equal(gyms[0].joinCode, out.joinCode)
+  })
+})
+
+describe('findGymByJoinCode', () => {
+  it('still matches after the owner picks a word code', () => {
+    const gyms = [{ id: 'g1', name: 'Alpha', joinCode: 'PALERMO' }]
+    assert.equal(findGymByJoinCode(gyms, ' palermo ').id, 'g1')
   })
 })

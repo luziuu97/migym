@@ -1,4 +1,4 @@
-/* opengym-api — passkey (WebAuthn) auth + per-user state storage for openGym
+/* opengym-api — email/password + passkey (WebAuthn) auth + per-user state
    No framework, JSON-file storage, signed session cookies.               */
 import http from 'node:http';
 import crypto from 'node:crypto';
@@ -11,9 +11,10 @@ import {
 import webpush from 'web-push';
 import { parseAppName, publicConfig } from './public-config.js';
 import {
-  makeGym, findGymByJoinCode, migrateOrphans, publicUser, usersInGym, sameGym,
-  setGymOwner, gymsWithOwners, gymHasOwner,
+  makeGym, migrateOrphans, usersInGym, sameGym,
+  setGymOwner, gymsWithOwners, applyJoinCode,
 } from './gyms.js';
+import { registerPassword, loginPassword, setOwnPassword, adminSetPassword, authPublic } from './auth.js';
 import { membershipActive, publicMembership, applyPaid, consumePackSession } from './membership.js';
 import { sanitizePlan } from './plan.js';
 import { memberAdherence, todayISO as adherenceToday } from './adherence.js';
@@ -207,7 +208,7 @@ function readSession(req) {
   return user;
 }
 function sessionUser(user) {
-  const u = publicUser(user, db.gyms, isAdmin);
+  const u = authPublic(user, db, isAdmin);
   if (u) u.membership = publicMembership({ ...user, admin: isAdmin(user) });
   return u;
 }
@@ -315,29 +316,63 @@ const routes = {
     json(res, 200, { user: sessionUser(user) });
   },
 
-  'POST /api/register/options': async (req, res) => {
+  'POST /api/register': async (req, res) => {
     const body = await readBody(req);
-    const name = String(body.name || '').trim().slice(0, 40);
-    if (!name) return json(res, 400, { error: 'name required' });
-    const code = String(body.code || '').trim().toUpperCase();
-    if (!findGymByJoinCode(db.gyms, code))
-      return json(res, 403, { error: 'a valid gym code is required' });
-    const uid = crypto.randomBytes(12).toString('base64url');
+    const out = await registerPassword(db, body);
+    if (!out.ok) return json(res, out.status, { error: out.error });
+    const user = out.user;
+    if (INVITE_ONLY) {
+      const code = String(body.code || '').trim().toUpperCase();
+      const invite = db.invites.find(i => i.code === code && !i.usedBy && !i.revoked);
+      if (invite) { user.invitedBy = invite.code; invite.usedBy = user.id; invite.usedAt = user.created; }
+    }
+    saveDb();
+    json(res, 200, { user: sessionUser(user) }, { 'Set-Cookie': sessionCookie(user) });
+  },
+
+  // New profiles use email+password. These stay so old clients get a clear error.
+  'POST /api/register/options': async (req, res) => json(res, 400, { error: 'register with email and password' }),
+  'POST /api/register/verify': async (req, res) => json(res, 400, { error: 'register with email and password' }),
+
+  'POST /api/login': async (req, res) => {
+    const body = await readBody(req);
+    const out = await loginPassword(db, body);
+    if (!out.ok) return json(res, out.status, { error: out.error });
+    json(res, 200, { user: sessionUser(out.user) }, { 'Set-Cookie': sessionCookie(out.user) });
+  },
+
+  'POST /api/account/password': async (req, res) => {
+    const user = readSession(req);
+    if (!user) return json(res, 401, { error: 'not signed in' });
+    const body = await readBody(req);
+    const out = await setOwnPassword(db, user, body);
+    if (!out.ok) return json(res, out.status, { error: out.error });
+    saveDb();
+    json(res, 200, { user: sessionUser(user) });
+  },
+
+  'POST /api/passkey/register/options': async (req, res) => {
+    const user = readSession(req);
+    if (!user) return json(res, 401, { error: 'not signed in' });
     const options = await generateRegistrationOptions({
       rpName: RP_NAME, rpID: RP_ID,
-      userID: Buffer.from(uid), userName: name, userDisplayName: name,
+      userID: Buffer.from(user.id),
+      userName: user.email || user.name,
+      userDisplayName: user.name,
       attestationType: 'none',
       authenticatorSelection: { residentKey: 'required', userVerification: 'preferred' },
       excludeCredentials: []
     });
-    const cid = putChallenge({ challenge: options.challenge, name, uid, code });
+    const cid = putChallenge({ challenge: options.challenge, uid: user.id, attach: true });
     json(res, 200, { cid, options });
   },
 
-  'POST /api/register/verify': async (req, res) => {
+  'POST /api/passkey/register/verify': async (req, res) => {
+    const user = readSession(req);
+    if (!user) return json(res, 401, { error: 'not signed in' });
     const body = await readBody(req);
     const c = takeChallenge(body.cid);
-    if (!c || !c.uid) return json(res, 400, { error: 'challenge expired — try again' });
+    if (!c || c.uid !== user.id || !c.attach) return json(res, 400, { error: 'challenge expired — try again' });
     let verification;
     try {
       verification = await verifyRegistrationResponse({
@@ -350,21 +385,9 @@ const routes = {
     } catch (e) { return json(res, 400, { error: 'verification failed: ' + e.message }); }
     if (!verification.verified) return json(res, 400, { error: 'not verified' });
     const { credential } = verification.registrationInfo;
-    if (db.creds.find(x => x.id === credential.id)) return json(res, 409, { error: 'credential already registered' });
-    // Re-check the invite at the last moment (it may have been used/revoked since options), then burn it.
-    const gym = findGymByJoinCode(db.gyms, c.code);
-    if (!gym) return json(res, 403, { error: 'a valid gym code is required' });
-    let invite = null;
-    if (INVITE_ONLY) {
-      invite = db.invites.find(i => i.code === c.code && !i.usedBy && !i.revoked);
-      // Gym join codes are enough; personal invites remain optional extras.
-    }
-    const user = {
-      id: c.uid, name: c.name, created: new Date().toISOString(), gymId: gym.id,
-      role: gymHasOwner(db.users, gym.id) ? 'member' : 'owner',
-    };
-    if (invite) { user.invitedBy = invite.code; invite.usedBy = user.id; invite.usedAt = user.created; }
-    db.users.push(user);
+    if (db.creds.find(x => x.id === credential.id && x.userId !== user.id))
+      return json(res, 409, { error: 'credential already registered' });
+    db.creds = db.creds.filter(x => x.userId !== user.id);
     db.creds.push({
       id: credential.id, userId: user.id,
       publicKey: Buffer.from(credential.publicKey).toString('base64url'),
@@ -372,7 +395,7 @@ const routes = {
       transports: body.credential?.response?.transports || []
     });
     saveDb();
-    json(res, 200, { user: sessionUser(user) }, { 'Set-Cookie': sessionCookie(user) });
+    json(res, 200, { user: sessionUser(user) });
   },
 
   'POST /api/login/options': async (req, res) => {
@@ -530,7 +553,8 @@ const routes = {
       const workouts = S.workouts || [];
       const last = workouts[workouts.length - 1];
       return {
-        id: u.id, name: u.name, created: u.created || null,
+        id: u.id, name: u.name, created: u.created || null, email: u.email || null,
+        hasPassword: !!u.password, hasPasskey: db.creds.some(c => c.userId === u.id),
         disabled: !!u.disabled, admin: isAdmin(u), invitedBy: u.invitedBy || null,
         workouts: workouts.length,
         lastWorkout: last ? last.d : null,
@@ -552,7 +576,7 @@ const routes = {
     if (!u || !canAccessUser(admin, u)) return json(res, 404, { error: 'no such user' });
     const S = readState(u.id) || {};
     json(res, 200, {
-      user: { id: u.id, name: u.name, created: u.created || null, disabled: !!u.disabled, admin: isAdmin(u), invitedBy: u.invitedBy || null, role: u.role || 'member', membership: publicMembership({ ...u, admin: isAdmin(u) }) },
+      user: { id: u.id, name: u.name, created: u.created || null, email: u.email || null, hasPassword: !!u.password, hasPasskey: db.creds.some(c => c.userId === u.id), disabled: !!u.disabled, admin: isAdmin(u), invitedBy: u.invitedBy || null, role: u.role || 'member', membership: publicMembership({ ...u, admin: isAdmin(u) }) },
       unit: S.unit || 'kg',
       lastSync: S._ts || null,
       routines: (S.routines || []).map(r => ({ id: r.id, name: r.name, emoji: r.emoji, count: (r.ex || []).length })),
@@ -663,6 +687,31 @@ const routes = {
     if (!u) return json(res, 404, { error: 'no such gym or user' });
     saveDb();
     json(res, 200, { ok: true, user: { id: u.id, name: u.name, gymId: u.gymId, role: u.role } });
+  },
+
+  'POST /api/admin/user/password': async (req, res) => {
+    const admin = requireAdmin(req, res); if (!admin) return;
+    const body = await readBody(req);
+    const u = db.users.find(x => x.id === body.id);
+    if (!u || !canAccessUser(admin, u)) return json(res, 404, { error: 'no such user' });
+    const out = await adminSetPassword(db, u, { password: body.password, email: body.email });
+    if (!out.ok) return json(res, out.status, { error: out.error });
+    saveDb();
+    json(res, 200, { ok: true, user: sessionUser(u) });
+  },
+
+  'POST /api/admin/gyms/join-code': async (req, res) => {
+    const admin = requireAdmin(req, res); if (!admin) return;
+    const body = await readBody(req);
+    let gym = null;
+    if (isAdmin(admin) && body.gymId) gym = db.gyms.find(g => g.id === body.gymId);
+    else gym = db.gyms.find(g => g.id === admin.gymId);
+    if (!gym) return json(res, 404, { error: 'no such gym' });
+    if (!isAdmin(admin) && gym.id !== admin.gymId) return json(res, 403, { error: 'forbidden' });
+    const out = applyJoinCode(db.gyms, gym, body.joinCode);
+    if (!out.ok) return json(res, out.status, { error: out.error });
+    saveDb();
+    json(res, 200, { gym: gymsWithOwners([gym], db.users)[0] });
   },
 
   'POST /api/admin/user/role': async (req, res) => {

@@ -12,6 +12,32 @@ export function newJoinCode() {
   return crypto.randomBytes(4).toString('hex').toUpperCase()
 }
 
+export function normalizeJoinCode(raw) {
+  return String(raw || '').trim().replace(/\s+/g, '').toUpperCase()
+}
+
+export function validateJoinCode(raw) {
+  const c = normalizeJoinCode(raw)
+  if (c.length < 4 || c.length > 24) return null
+  if (!/^[A-Z0-9-]+$/.test(c)) return null
+  return c
+}
+
+export function applyJoinCode(gyms, gym, raw) {
+  if (!gym) return { ok: false, status: 404, error: 'no such gym' }
+  const trimmed = String(raw ?? '').trim()
+  if (!trimmed) {
+    gym.joinCode = newJoinCode()
+    return { ok: true, joinCode: gym.joinCode }
+  }
+  const code = validateJoinCode(trimmed)
+  if (!code) return { ok: false, status: 400, error: 'invalid join code' }
+  const taken = (gyms || []).some(g => g.id !== gym.id && normalizeJoinCode(g.joinCode) === code)
+  if (taken) return { ok: false, status: 409, error: 'code already in use' }
+  gym.joinCode = code
+  return { ok: true, joinCode: code }
+}
+
 export function makeGym(name, opts = {}) {
   const n = String(name || '').trim().slice(0, 60) || 'MiGYM'
   return {
@@ -24,9 +50,9 @@ export function makeGym(name, opts = {}) {
 }
 
 export function findGymByJoinCode(gyms, code) {
-  const c = String(code || '').trim().toUpperCase()
+  const c = normalizeJoinCode(code)
   if (!c) return null
-  return (gyms || []).find(g => g.joinCode === c) || null
+  return (gyms || []).find(g => normalizeJoinCode(g.joinCode) === c) || null
 }
 
 export function publicGym(g) {

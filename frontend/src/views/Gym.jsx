@@ -6,6 +6,7 @@ import { api } from '../lib/api.js'
 import { fmtDate } from '../lib/format.js'
 import { t } from '../lib/i18n.js'
 import Icon from '../components/Icon.jsx'
+import { Button } from '../components/ui.jsx'
 import { UserDetail, InvitesCard, rel, dur } from './adminShared.jsx'
 
 export default function Gym() {
@@ -55,12 +56,7 @@ export default function Gym() {
       <button className="iconbtn" onClick={() => { loadUsers(); loadInvites(); loadGym(); loadAdherence() }} aria-label={t('refresh')}>↻</button>
     </div>
 
-    {gym && <div className="card" style={{ marginBottom: 16 }}>
-      <div className="dim small">{t('Join code')}</div>
-      <div style={{ fontFamily: 'ui-monospace,monospace', fontWeight: 600, letterSpacing: '.1em', fontSize: '1.1rem', marginTop: 4 }}
-        onClick={() => { navigator.clipboard?.writeText(gym.joinCode).catch(() => {}); toast(t('Copied {0}', gym.joinCode)) }}>{gym.joinCode}</div>
-      <div className="dim small" style={{ marginTop: 6 }}>{t('Share this code so members can create a profile.')}</div>
-    </div>}
+    {gym && <JoinCodeCard gym={gym} onChanged={g => setGym(g)} canEdit={canBill} />}
 
     <div className="tiles" style={{ marginBottom: 12 }}>
       <div className="tile"><div className="l">{t('Users')}</div><div className="v">{users ? users.length : '—'}</div></div>
@@ -107,5 +103,42 @@ export default function Gym() {
       </div>)}
       {users && !users.length && <div className="empty">{t('No users yet.')}</div>}
     </div>
+  </div>
+}
+
+function JoinCodeCard({ gym, onChanged, canEdit }) {
+  const toast = useUI(s => s.toast)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(gym.joinCode || '')
+  const [busy, setBusy] = useState(false)
+  const copy = () => { navigator.clipboard?.writeText(gym.joinCode).catch(() => {}); toast(t('Copied {0}', gym.joinCode)) }
+  const save = async (joinCode) => {
+    setBusy(true)
+    try {
+      const { gym: next } = await api('/api/admin/gyms/join-code', { method: 'POST', body: JSON.stringify({ gymId: gym.id, joinCode }) })
+      onChanged(next)
+      setDraft(next.joinCode)
+      setEditing(false)
+      toast(t('Join code updated'))
+    } catch (e) { toast(e.message || t('Invalid join code')) }
+    finally { setBusy(false) }
+  }
+  return <div className="card" style={{ marginBottom: 16 }}>
+    <div className="dim small">{t('Join code')}</div>
+    {editing ? <>
+      <input className="input" value={draft} maxLength={24} onChange={e => setDraft(e.target.value.toUpperCase())}
+        placeholder={t('e.g. PALERMO')} style={{ marginTop: 8, letterSpacing: '.06em', fontWeight: 600, textAlign: 'center' }} />
+      <div className="dim small" style={{ marginTop: 6 }}>{t('Letters, numbers and hyphens — 4 to 24 characters.')}</div>
+      <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+        <Button variant="primary" size="sm" disabled={busy} onClick={() => save(draft)}>{t('Save code')}</Button>
+        <Button size="sm" disabled={busy} onClick={() => save('')}>{t('New random code')}</Button>
+        <Button size="sm" variant="ghost" onClick={() => { setEditing(false); setDraft(gym.joinCode) }}>{t('Cancel')}</Button>
+      </div>
+    </> : <>
+      <div style={{ fontFamily: 'ui-monospace,monospace', fontWeight: 600, letterSpacing: '.1em', fontSize: '1.1rem', marginTop: 4 }}
+        onClick={copy}>{gym.joinCode}</div>
+      <div className="dim small" style={{ marginTop: 6 }}>{t('Share this code so members can create a profile.')}</div>
+      {canEdit && <div style={{ marginTop: 10 }}><Button size="sm" onClick={() => { setDraft(gym.joinCode); setEditing(true) }}>{t('Change join code')}</Button></div>}
+    </>}
   </div>
 }
