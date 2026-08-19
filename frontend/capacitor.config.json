@@ -1,8 +1,11 @@
 {
-  "appId": "ch.duartesantos.opengym",
-  "appName": "openGym",
+  "appId": "com.lporta.migym",
+  "appName": "MiGYM",
   "webDir": "dist",
   "backgroundColor": "#0c0e12",
+  "ios": {
+    "contentInset": "automatic"
+  },
   "android": {
     "allowMixedContent": false
   }

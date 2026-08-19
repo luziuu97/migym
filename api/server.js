@@ -9,12 +9,22 @@ import {
   generateAuthenticationOptions, verifyAuthenticationResponse
 } from '@simplewebauthn/server';
 import webpush from 'web-push';
+import { parseAppName, publicConfig } from './public-config.js';
+import {
+  makeGym, findGymByJoinCode, migrateOrphans, publicUser, usersInGym, sameGym,
+  setGymOwner, gymsWithOwners,
+} from './gyms.js';
+import { membershipActive, publicMembership, applyPaid, consumePackSession } from './membership.js';
+import { sanitizePlan } from './plan.js';
+import { memberAdherence, todayISO as adherenceToday } from './adherence.js';
 
 const PORT = +(process.env.PORT || 3000);
 const DATA = process.env.DATA_DIR || '/data';
 const RP_ID = process.env.RP_ID || 'localhost';
 const ORIGIN = process.env.ORIGIN || 'http://localhost:8080';
-const RP_NAME = process.env.RP_NAME || 'openGym';
+// APP_NAME is the name on screen; RP_NAME is the passkey prompt. Unset, they follow each other.
+const APP_NAME = parseAppName(process.env.APP_NAME || process.env.RP_NAME);
+const RP_NAME = parseAppName(process.env.RP_NAME || APP_NAME);
 // Admin dashboard (issue): admins are matched by uid; INVITE_ONLY gates new signups behind a
 // code the admin generates. Both default off so a fresh self-hosted instance stays open.
 const ADMIN_UIDS = (process.env.ADMIN_UIDS || '').split(',').map(s => s.trim()).filter(Boolean);
@@ -41,12 +51,15 @@ if (!fs.existsSync(secretFile)) fs.writeFileSync(secretFile, crypto.randomBytes(
 const SECRET = fs.readFileSync(secretFile, 'utf8').trim();
 
 const dbFile = path.join(DATA, 'db.json');
-let db = { users: [], creds: [], subs: [], invites: [] };
+let db = { users: [], creds: [], subs: [], invites: [], gyms: [] };
 try { db = JSON.parse(fs.readFileSync(dbFile, 'utf8')); } catch {}
 db.subs = db.subs || [];
 db.invites = db.invites || [];
+db.gyms = db.gyms || [];
 const isAdmin = user => !!user && (user.admin === true || ADMIN_UIDS.includes(user.id));
 function saveDb() { atomicWrite(dbFile, JSON.stringify(db, null, 2)); }
+migrateOrphans(db, { defaultName: APP_NAME, isOwner: u => ADMIN_UIDS.includes(u.id) });
+saveDb();
 function atomicWrite(file, content) {
   const tmp = file + '.tmp';
   fs.writeFileSync(tmp, content);
@@ -193,12 +206,38 @@ function readSession(req) {
   if (!Number.isInteger(claimed) || claimed !== sessionVersion(user)) return null;
   return user;
 }
-// Guard for /api/admin/* — resolves the caller and 401/403s if they aren't an admin.
+function sessionUser(user) {
+  const u = publicUser(user, db.gyms, isAdmin);
+  if (u) u.membership = publicMembership({ ...user, admin: isAdmin(user) });
+  return u;
+}
+function allowMemberWrite(user, res) {
+  if (membershipActive({ ...user, admin: isAdmin(user) })) return true;
+  json(res, 403, { error: 'membership_lapsed' });
+  return false;
+}
+
+// Guard for /api/admin/* — platform admin or gym owner.
 function requireAdmin(req, res) {
   const user = readSession(req);
   if (!user) { json(res, 401, { error: 'not signed in' }); return null; }
-  if (!isAdmin(user)) { json(res, 403, { error: 'forbidden' }); return null; }
+  if (!isAdmin(user) && user.role !== 'owner') { json(res, 403, { error: 'forbidden' }); return null; }
   return user;
+}
+function requireStaff(req, res) {
+  const user = readSession(req);
+  if (!user) { json(res, 401, { error: 'not signed in' }); return null; }
+  if (!isAdmin(user) && user.role !== 'owner' && user.role !== 'trainer') { json(res, 403, { error: 'forbidden' }); return null; }
+  return user;
+}
+function visibleUsers(viewer) {
+  if (isAdmin(viewer)) return db.users;
+  return usersInGym(db.users, viewer.gymId);
+}
+function canAccessUser(viewer, target) {
+  if (!target) return false;
+  if (isAdmin(viewer)) return true;
+  return sameGym(viewer, target);
 }
 function sessionCookie(user) {
   return `gymsid=${makeSession(user)}; Path=/; Max-Age=${SESSION_DAYS * 86400}; HttpOnly;${SECURE} SameSite=Lax`;
@@ -261,12 +300,19 @@ const routes = {
   'GET /api/health': async (req, res) => json(res, 200, { ok: true, users: db.users.length }),
 
   // Public config the login screen needs before anyone is signed in.
-  'GET /api/config': async (req, res) => json(res, 200, { invite_only: INVITE_ONLY, allow_guest: ALLOW_GUEST }),
+  'GET /api/config': async (req, res) => json(res, 200, publicConfig({
+    invite_only: INVITE_ONLY,
+    allow_guest: ALLOW_GUEST,
+    join_required: true,
+    APP_NAME: process.env.APP_NAME,
+    RP_NAME: process.env.RP_NAME,
+    DEFAULT_LANG: process.env.DEFAULT_LANG,
+  })),
 
   'GET /api/me': async (req, res) => {
     const user = readSession(req);
     if (!user) return json(res, 401, { error: 'not signed in' });
-    json(res, 200, { user: { id: user.id, name: user.name, admin: isAdmin(user) } });
+    json(res, 200, { user: sessionUser(user) });
   },
 
   'POST /api/register/options': async (req, res) => {
@@ -274,8 +320,8 @@ const routes = {
     const name = String(body.name || '').trim().slice(0, 40);
     if (!name) return json(res, 400, { error: 'name required' });
     const code = String(body.code || '').trim().toUpperCase();
-    if (INVITE_ONLY && !db.invites.some(i => i.code === code && !i.usedBy && !i.revoked))
-      return json(res, 403, { error: 'a valid invite code is required' });
+    if (!findGymByJoinCode(db.gyms, code))
+      return json(res, 403, { error: 'a valid gym code is required' });
     const uid = crypto.randomBytes(12).toString('base64url');
     const options = await generateRegistrationOptions({
       rpName: RP_NAME, rpID: RP_ID,
@@ -306,12 +352,14 @@ const routes = {
     const { credential } = verification.registrationInfo;
     if (db.creds.find(x => x.id === credential.id)) return json(res, 409, { error: 'credential already registered' });
     // Re-check the invite at the last moment (it may have been used/revoked since options), then burn it.
+    const gym = findGymByJoinCode(db.gyms, c.code);
+    if (!gym) return json(res, 403, { error: 'a valid gym code is required' });
     let invite = null;
     if (INVITE_ONLY) {
       invite = db.invites.find(i => i.code === c.code && !i.usedBy && !i.revoked);
-      if (!invite) return json(res, 403, { error: 'invite code is no longer valid — ask for a new one' });
+      // Gym join codes are enough; personal invites remain optional extras.
     }
-    const user = { id: c.uid, name: c.name, created: new Date().toISOString() };
+    const user = { id: c.uid, name: c.name, created: new Date().toISOString(), gymId: gym.id, role: 'member' };
     if (invite) { user.invitedBy = invite.code; invite.usedBy = user.id; invite.usedAt = user.created; }
     db.users.push(user);
     db.creds.push({
@@ -321,7 +369,7 @@ const routes = {
       transports: body.credential?.response?.transports || []
     });
     saveDb();
-    json(res, 200, { user: { id: user.id, name: user.name, admin: isAdmin(user) } }, { 'Set-Cookie': sessionCookie(user) });
+    json(res, 200, { user: sessionUser(user) }, { 'Set-Cookie': sessionCookie(user) });
   },
 
   'POST /api/login/options': async (req, res) => {
@@ -360,7 +408,7 @@ const routes = {
     const user = db.users.find(u => u.id === cred.userId);
     if (!user) return json(res, 500, { error: 'user missing' });
     if (user.disabled) return json(res, 403, { error: 'this account has been disabled' });
-    json(res, 200, { user: { id: user.id, name: user.name, admin: isAdmin(user) } }, { 'Set-Cookie': sessionCookie(user) });
+    json(res, 200, { user: sessionUser(user) }, { 'Set-Cookie': sessionCookie(user) });
   },
 
   'POST /api/logout': async (req, res) => json(res, 200, { ok: true }, { 'Set-Cookie': clearCookie }),
@@ -389,10 +437,19 @@ const routes = {
   'PUT /api/data': async (req, res) => {
     const user = readSession(req);
     if (!user) return json(res, 401, { error: 'not signed in' });
+    if (!allowMemberWrite(user, res)) return;
     const body = await readBody(req);
     if (!body.state || typeof body.state !== 'object') return json(res, 400, { error: 'state required' });
     delete body.state.active;              // in-progress workouts stay device-local
+    const prev = readState(user.id);
     atomicWrite(stateFile(user.id), JSON.stringify(body.state));
+    const prevN = (prev && prev.workouts || []).length;
+    const nextN = (body.state.workouts || []).length;
+    if (nextN > prevN && user.role === 'member' && user.membership && user.membership.plan === 'pack') {
+      const next = consumePackSession(user);
+      user.membership = next.membership;
+      saveDb();
+    }
     json(res, 200, { ok: true, ts: body.state._ts || null });
   },
 
@@ -422,7 +479,7 @@ const routes = {
   'POST /api/push/test': async (req, res) => {
     const user = readSession(req);
     if (!user) return json(res, 401, { error: 'not signed in' });
-    await sendPush(user.id, { title: 'openGym', body: 'Test notification ✅ — this is what alerts look like.', tag: 'test' });
+    await sendPush(user.id, { title: APP_NAME, body: 'Test notification ✅ — this is what alerts look like.', tag: 'test' });
     json(res, 200, { ok: true });
   },
 
@@ -447,6 +504,7 @@ const routes = {
   'POST /api/activity': async (req, res) => {
     const user = readSession(req);
     if (!user) return json(res, 401, { error: 'not signed in' });
+    if (!allowMemberWrite(user, res)) return;
     const body = await readBody(req);
     if (body.active) {
       presence.set(user.id, {
@@ -463,8 +521,8 @@ const routes = {
   /* ---------- admin dashboard ---------- */
   // One row per user, cheap enough for a personal instance (reads each state file once).
   'GET /api/admin/users': async (req, res) => {
-    if (!requireAdmin(req, res)) return;
-    const users = db.users.map(u => {
+    const admin = requireStaff(req, res); if (!admin) return;
+    const users = visibleUsers(admin).map(u => {
       const S = readState(u.id) || {};
       const workouts = S.workouts || [];
       const last = workouts[workouts.length - 1];
@@ -475,7 +533,9 @@ const routes = {
         lastWorkout: last ? last.d : null,
         lastSync: S._ts || null,
         hasPush: db.subs.some(s => s.userId === u.id),
-        live: livePresence(u.id)
+        live: livePresence(u.id),
+        membership: publicMembership({ ...u, admin: isAdmin(u) }),
+        role: u.role || 'member',
       };
     });
     json(res, 200, { users, invite_only: INVITE_ONLY, now: Date.now() });
@@ -483,13 +543,13 @@ const routes = {
 
   // Drill-down: full workout history + body-weight log for one user.
   'GET /api/admin/user': async (req, res) => {
-    if (!requireAdmin(req, res)) return;
+    const admin = requireStaff(req, res); if (!admin) return;
     const id = new URL(req.url, 'http://x').searchParams.get('id');
     const u = db.users.find(x => x.id === id);
-    if (!u) return json(res, 404, { error: 'no such user' });
+    if (!u || !canAccessUser(admin, u)) return json(res, 404, { error: 'no such user' });
     const S = readState(u.id) || {};
     json(res, 200, {
-      user: { id: u.id, name: u.name, created: u.created || null, disabled: !!u.disabled, admin: isAdmin(u), invitedBy: u.invitedBy || null },
+      user: { id: u.id, name: u.name, created: u.created || null, disabled: !!u.disabled, admin: isAdmin(u), invitedBy: u.invitedBy || null, role: u.role || 'member', membership: publicMembership({ ...u, admin: isAdmin(u) }) },
       unit: S.unit || 'kg',
       lastSync: S._ts || null,
       routines: (S.routines || []).map(r => ({ id: r.id, name: r.name, emoji: r.emoji, count: (r.ex || []).length })),
@@ -499,15 +559,31 @@ const routes = {
   },
 
   'POST /api/admin/user/disable': async (req, res) => {
-    if (!requireAdmin(req, res)) return;
+    const admin = requireAdmin(req, res); if (!admin) return;
     const body = await readBody(req);
     const u = db.users.find(x => x.id === body.id);
-    if (!u) return json(res, 404, { error: 'no such user' });
+    if (!u || !canAccessUser(admin, u)) return json(res, 404, { error: 'no such user' });
     if (isAdmin(u)) return json(res, 400, { error: 'cannot disable an admin' });
     u.disabled = !!body.disabled;
     if (u.disabled) presence.delete(u.id);   // drop them off "training now" at once
     saveDb();
     json(res, 200, { ok: true, id: u.id, disabled: u.disabled });
+  },
+
+  'POST /api/admin/user/membership': async (req, res) => {
+    const admin = requireAdmin(req, res); if (!admin) return;
+    const body = await readBody(req);
+    const u = db.users.find(x => x.id === body.id);
+    if (!u || !canAccessUser(admin, u)) return json(res, 404, { error: 'no such user' });
+    u.membership = applyPaid(u.membership, {
+      plan: body.plan,
+      markPaid: true,
+      expiresOn: body.expiresOn,
+      sessionsLeft: body.sessionsLeft,
+      sessionsAdd: body.sessionsAdd,
+    });
+    saveDb();
+    json(res, 200, { ok: true, membership: publicMembership({ ...u, admin: isAdmin(u) }) });
   },
 
   'GET /api/admin/invites': async (req, res) => {
@@ -543,6 +619,107 @@ const routes = {
     db.invites = db.invites.filter(i => i.code !== inv.code);
     saveDb();
     json(res, 200, { ok: true });
+  },
+
+  'GET /api/admin/gyms': async (req, res) => {
+    const admin = requireAdmin(req, res); if (!admin) return;
+    const gyms = isAdmin(admin) ? db.gyms : db.gyms.filter(g => g.id === admin.gymId);
+    json(res, 200, { gyms: gymsWithOwners(gyms, db.users) });
+  },
+
+  'POST /api/admin/gyms': async (req, res) => {
+    const admin = requireAdmin(req, res); if (!admin) return;
+    if (!isAdmin(admin)) return json(res, 403, { error: 'forbidden' });
+    const body = await readBody(req);
+    const name = String(body.name || '').trim();
+    if (!name) return json(res, 400, { error: 'name required' });
+    const gym = makeGym(name);
+    db.gyms.push(gym);
+    if (body.ownerId) setGymOwner(db, gym.id, body.ownerId);
+    saveDb();
+    json(res, 200, { gym: gymsWithOwners([gym], db.users)[0] });
+  },
+
+  'POST /api/admin/gyms/rename': async (req, res) => {
+    const admin = requireAdmin(req, res); if (!admin) return;
+    if (!isAdmin(admin)) return json(res, 403, { error: 'forbidden' });
+    const body = await readBody(req);
+    const gym = db.gyms.find(g => g.id === body.id);
+    const name = String(body.name || '').trim();
+    if (!gym || !name) return json(res, 400, { error: 'name required' });
+    gym.name = name.slice(0, 60);
+    saveDb();
+    json(res, 200, { gym });
+  },
+
+  'POST /api/admin/gyms/owner': async (req, res) => {
+    const admin = requireAdmin(req, res); if (!admin) return;
+    if (!isAdmin(admin)) return json(res, 403, { error: 'forbidden' });
+    const body = await readBody(req);
+    const u = setGymOwner(db, body.gymId, body.userId);
+    if (!u) return json(res, 404, { error: 'no such gym or user' });
+    saveDb();
+    json(res, 200, { ok: true, user: { id: u.id, name: u.name, gymId: u.gymId, role: u.role } });
+  },
+
+  'POST /api/admin/user/role': async (req, res) => {
+    const admin = requireAdmin(req, res); if (!admin) return;
+    const body = await readBody(req);
+    const u = db.users.find(x => x.id === body.id);
+    if (!u || !canAccessUser(admin, u)) return json(res, 404, { error: 'no such user' });
+    const role = body.role;
+    if (!['owner', 'trainer', 'member'].includes(role)) return json(res, 400, { error: 'invalid role' });
+    if (role === 'owner' && !isAdmin(admin)) return json(res, 403, { error: 'forbidden' });
+    if (u.id === admin.id && role !== 'owner' && !isAdmin(admin)) return json(res, 400, { error: 'cannot demote yourself' });
+    u.role = role;
+    saveDb();
+    json(res, 200, { ok: true, role: u.role });
+  },
+
+  'GET /api/trainer/plan': async (req, res) => {
+    const staff = requireStaff(req, res); if (!staff) return;
+    const id = new URL(req.url, 'http://x').searchParams.get('id');
+    const u = db.users.find(x => x.id === id);
+    if (!u || !canAccessUser(staff, u)) return json(res, 404, { error: 'no such user' });
+    const S = readState(u.id) || {};
+    json(res, 200, { routines: S.routines || [], week: S.week || {}, customEx: S.customEx || [], name: u.name });
+  },
+
+  'PUT /api/trainer/plan': async (req, res) => {
+    const staff = requireStaff(req, res); if (!staff) return;
+    const body = await readBody(req);
+    const u = db.users.find(x => x.id === body.id);
+    if (!u || !canAccessUser(staff, u)) return json(res, 404, { error: 'no such user' });
+    const plan = sanitizePlan(body);
+    const S = readState(u.id) || {};
+    S.routines = plan.routines;
+    S.week = plan.week;
+    if (plan.customEx.length) S.customEx = plan.customEx;
+    S._ts = Date.now();
+    atomicWrite(stateFile(u.id), JSON.stringify(S));
+    json(res, 200, { ok: true, ts: S._ts });
+  },
+
+  'GET /api/admin/adherence': async (req, res) => {
+    const staff = requireStaff(req, res); if (!staff) return;
+    const today = adherenceToday();
+    const members = visibleUsers(staff);
+    const rows = members.map(u => {
+      const S = readState(u.id) || {};
+      const a = memberAdherence(S, today);
+      return {
+        id: u.id, name: u.name, role: u.role || 'member',
+        membership: publicMembership({ ...u, admin: isAdmin(u) }),
+        live: livePresence(u.id),
+        ...a,
+      };
+    });
+    json(res, 200, {
+      today,
+      trainedToday: rows.filter(r => r.trainedToday).length,
+      members: rows.length,
+      rows,
+    });
   }
 };
 

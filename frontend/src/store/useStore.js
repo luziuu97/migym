@@ -4,6 +4,7 @@ import { localTZ } from '../lib/format.js'
 import { registerCustom } from '../lib/exercises.js'
 import { DEMO, DEMO_SEEDED } from '../lib/demo.js'
 import { guestAllowed } from '../lib/guest.js'
+import { withInstanceDefaults } from '../lib/instance.js'
 import { MOBILE, nativeLoad, nativeSave, syncReminder } from '../lib/mobile.js'
 
 const KEY = 'gym_state_v1'
@@ -77,7 +78,7 @@ export const useStore = create((set, get) => {
     localStorage.removeItem('gym_guest')
     localStorage.removeItem('gym_dirty')
     localStorage.removeItem(KEY)
-    persist(clone(DEF), false)
+    persist(withInstanceDefaults(clone(DEF), get().config, { hasSavedState: false }), false)
   }
 
   return {
@@ -96,9 +97,9 @@ export const useStore = create((set, get) => {
     isGuest: () => localStorage.getItem('gym_guest') === '1',
     setGuest(v) { if (v) localStorage.setItem('gym_guest', '1'); else localStorage.removeItem('gym_guest'); set({}) },
 
-    // Public config from /api/config (invite_only, allow_guest). null until the first successful
-    // fetch — the login screen and boot both read it, so it is fetched once and cached here
-    // rather than by each screen that happens to need it.
+    // Public config from /api/config (invite_only, allow_guest, app_name, default_lang).
+    // null until the first successful fetch — the login screen and boot both read it, so it
+    // is fetched once and cached here rather than by each screen that happens to need it.
     config: null,
     async loadConfig() {
       if (get().config) return get().config
@@ -126,6 +127,7 @@ export const useStore = create((set, get) => {
         if (state && (!hasData(S) || ((state._ts || 0) >= (S._ts || 0) && !dirty))) {
           const active = S.active
           const next = Object.assign(clone(DEF), state)
+          if (!state.lang) next.lang = S.lang
           if (active) next.active = active
           persist(next, false)
         } else if (hasData(S)) { await get().pushState() }
@@ -189,6 +191,11 @@ export const useStore = create((set, get) => {
       // an unreachable server must not be allowed to lock anyone out (#42).
       const cfg = await get().loadConfig()
       if (!guestAllowed(cfg)) get().setGuest(false)
+      // New device / empty localStorage: pick the instance default language before the
+      // login screen renders. A saved profile keeps whatever language it already chose.
+      if (!localStorage.getItem(KEY)) {
+        persist(withInstanceDefaults(clone(DEF), cfg, { hasSavedState: false }), false)
+      }
       try {
         const me = await api('/api/me')
         get().setUser(me.user)

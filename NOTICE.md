@@ -1,7 +1,20 @@
 # Third-party notices
 
 openGym — Copyright (C) 2026 Duarte Santos.
-openGym's own code is licensed under the **GNU AGPL v3.0** (see [LICENSE](LICENSE)).
+MiGYM (this modified version) — Copyright (C) 2026 Lucius Porta.
+
+This repository is a **modified version** of [openGym](https://github.com/DuarteSantos8/openGym)
+(also mirrored at [gitea.com/DuarteSantos/openGym](https://gitea.com/DuarteSantos/openGym)).
+Modifications dated **August 2026** include multi-tenant gyms, membership recording, trainer
+plan assignment, instance branding, and a Capacitor shell that talks to a hosted API.
+
+The entire work, including those modifications, is licensed under the **GNU AGPL v3.0**
+(see [LICENSE](LICENSE)). The original copyright notices are preserved. Recipients of this
+modified version receive the same freedoms (and the same copyleft obligations) as for openGym.
+
+Corresponding source for this modified version is this repository. Operators who run it as a
+network service must offer that source to their users (AGPL §13); the in-app Settings footer
+links here.
 
 ## App store exception
 

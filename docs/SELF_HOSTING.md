@@ -73,6 +73,8 @@ RP_ID=gym.example.com
 ORIGIN=https://gym.example.com
 WEB_PORT=8080
 RP_NAME=openGym
+# APP_NAME=openGym          # login / tab / iPhone home-screen name (defaults to RP_NAME)
+# DEFAULT_LANG=en           # language for new devices (es, de, fr, …)
 ```
 
 ```bash

@@ -4,6 +4,10 @@
 
 <br>
 
+**MiGYM** is a modified version of [openGym](https://github.com/DuarteSantos8/openGym)
+(AGPL-3.0). Original copyright © 2026 Duarte Santos; modifications © 2026 Lucius Porta.
+See [NOTICE.md](NOTICE.md) and [LICENSE](LICENSE).
+
 **A self-hosted gym & body-weight tracker you actually own.**
 
 Plan your week, run guided workouts, track every set and your body weight over time —
@@ -19,9 +23,9 @@ No account on someone else's server, no subscription, no ads. Just `docker compo
 ![Docker](https://img.shields.io/badge/Docker-compose-2496ED?style=flat-square&logo=docker&logoColor=white)
 ![No tracking](https://img.shields.io/badge/telemetry-none-f472b6?style=flat-square)
 <br>
-![GitHub last commit](https://img.shields.io/github/last-commit/DuarteSantos8/openGym?style=flat-square)
-[![GitHub stars](https://img.shields.io/github/stars/DuarteSantos8/openGym?style=flat-square)](https://github.com/DuarteSantos8/openGym/stargazers)
-[![GitHub issues](https://img.shields.io/github/issues/DuarteSantos8/openGym?style=flat-square)](https://github.com/DuarteSantos8/openGym/issues)
+![GitHub last commit](https://img.shields.io/github/last-commit/luziuu97/migym?style=flat-square)
+[![GitHub stars](https://img.shields.io/github/stars/luziuu97/migym?style=flat-square)](https://github.com/luziuu97/migym/stargazers)
+[![GitHub issues](https://img.shields.io/github/issues/luziuu97/migym?style=flat-square)](https://github.com/luziuu97/migym/issues)
 
 </div>
 
@@ -92,17 +96,15 @@ as a home-screen app, passkey sign-in, offline support, sync across your phone a
 You need [Docker](https://docs.docker.com/get-docker/) with Compose.
 
 ```bash
-git clone https://github.com/DuarteSantos8/openGym
-cd openGym
+git clone https://github.com/luziuu97/migym
+cd migym
 cp .env.example .env
-docker compose pull   # grab prebuilt images (amd64 + arm64) — skip to build from source instead
-docker compose up -d
+docker compose up -d --build
 ```
 
 Open **http://localhost:8080**, tap **Create profile**, and you're in. First launch downloads
-the exercise media (~140 MB) once. Prefer building the images yourself instead of pulling from
-`ghcr.io`? Drop the `pull` step and run `docker compose up -d --build` — you don't need Node or
-a build step locally either way.
+the exercise media (~140 MB) once. Build from this source — the `ghcr.io/duartesantos8/opengym-*`
+images are **upstream openGym** and do not include MiGYM's modifications.
 
 > Want it reachable from your phone over the internet with passkeys? You'll need an HTTPS
 > domain — a two-line change in `.env`. See **[docs/SELF_HOSTING.md](docs/SELF_HOSTING.md)**.
@@ -159,6 +161,8 @@ All via `.env` (see `.env.example`):
 | `BACKEND`     | Name of the API service that `/api` is proxied to — change it if yours isn't called `api` | `api` |
 | `PORT`        | Port the API listens on; the web container proxies to the same value | `3000`  |
 | `RP_NAME`     | Name shown in the passkey prompt                     | `openGym`               |
+| `APP_NAME`    | Name on the login screen, tab, and iPhone home screen | `RP_NAME` (else `openGym`) |
+| `DEFAULT_LANG`| UI language for new devices (`en`, `es`, `de`, …)    | `en`                    |
 | `SESSION_DAYS`| How long a sign-in lasts, in days                    | `90`                    |
 | `ADMIN_UIDS`  | User ids that get the admin dashboard (comma-separated) | *(none)*             |
 | `INVITE_ONLY` | Require an invite code to create a profile           | *(off)*                 |
@@ -229,8 +233,16 @@ top of the page is there — a star, a bug report or a PR is worth just as much.
 
 ## License
 
-[GNU AGPL v3.0](LICENSE) — free and open source. You can self-host, use, modify and share it;
-if you run a modified version as a network service, you must offer that version's source under
-the same license. Nobody can turn openGym into a closed, proprietary product.
+This program is a **modified version** of openGym, released **August 2026** under the same
+[GNU AGPL v3.0](LICENSE). You can self-host, use, modify and share it; if you run it as a
+network service, you must offer **this version's** corresponding source under the same license
+(AGPL §13). Nobody can turn it into a closed, proprietary product.
 
-Exercise images/GIFs are fetched from the upstream dataset and keep their own terms — see [NOTICE.md](NOTICE.md).
+- Original work: Copyright (C) 2026 Duarte Santos — [openGym](https://github.com/DuarteSantos8/openGym)
+- This modified version: Copyright (C) 2026 Lucius Porta — this repository
+- Third-party notices (MuscleMap MIT, exercise dataset): [NOTICE.md](NOTICE.md)
+
+The verbatim AGPL text is in [LICENSE](LICENSE). The original §7 app-store additional permission
+in NOTICE.md is preserved.
+
+Exercise images/GIFs are fetched from the upstream dataset and keep their own terms.

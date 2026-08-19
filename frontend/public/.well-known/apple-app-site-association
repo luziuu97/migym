@@ -1,0 +1,16 @@
+{
+  "webcredentials": {
+    "apps": [
+      "G4TR6W97J4.com.lporta.migym"
+    ]
+  },
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appID": "G4TR6W97J4.com.lporta.migym",
+        "paths": ["*"]
+      }
+    ]
+  }
+}

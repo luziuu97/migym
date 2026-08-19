@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### MiGYM (modified version of openGym)
+
+This tree is a modified version of openGym, August 2026. The whole work remains GNU AGPL v3.0.
+See [NOTICE.md](NOTICE.md).
+
+- Multi-tenant gyms, join codes, owner/trainer/member roles
+- Membership recording (no payments in-app); lapsed members are locked out
+- Gym owners and trainers can assign weekly routines to members
+- Platform super-admin can create gyms and assign owners
+- Instance branding via `APP_NAME` / `DEFAULT_LANG`; guest mode off by default
+- Capacitor iOS/Android shells that load the hosted instance
+
 ### Fixes
 
 - ⬅️ **The back gesture no longer quits the app** (Android). The packaged app never listened for

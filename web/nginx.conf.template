@@ -5,6 +5,13 @@ server {
     root /usr/share/nginx/html;
     index index.html;
 
+    # Apple Associated Domains (passkeys in the native iOS WebView). Must not fall
+    # through to index.html, and must be served as JSON with no file extension.
+    location = /.well-known/apple-app-site-association {
+        default_type application/json;
+        add_header Cache-Control "no-cache";
+    }
+
     # API → backend container
     location /api/ {
         proxy_pass http://${BACKEND}:${PORT};
