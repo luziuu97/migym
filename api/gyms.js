@@ -68,6 +68,11 @@ export function setGymOwner(db, gymId, userId) {
   return user
 }
 
+export function gymHasOwner(users, gymId) {
+  if (!gymId) return false
+  return (users || []).some(u => u.gymId === gymId && u.role === 'owner')
+}
+
 export function gymsWithOwners(gyms, users) {
   return (gyms || []).map(g => ({
     ...g,

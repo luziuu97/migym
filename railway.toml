@@ -1,0 +1,9 @@
+# Web service (deploy from repo root). API uses api/Dockerfile via `railway up ./api`.
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "web/Dockerfile"
+
+[deploy]
+healthcheckPath = "/"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"

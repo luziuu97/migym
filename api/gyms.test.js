@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   slugify, makeGym, findGymByJoinCode, publicGym, usersInGym,
   sameGym, migrateOrphans, staffOfGym, publicUser, setGymOwner, gymsWithOwners,
+  gymHasOwner,
 } from './gyms.js'
 
 describe('slugify', () => {
@@ -111,6 +112,19 @@ describe('setGymOwner', () => {
     assert.equal(u.gymId, 'g2')
     assert.equal(u.role, 'owner')
     assert.equal(db.users[1].role, 'member')
+  })
+})
+
+describe('gymHasOwner', () => {
+  it('is false until someone in that gym is owner', () => {
+    const users = [
+      { id: 'u1', gymId: 'g1', role: 'member' },
+      { id: 'u2', gymId: 'g2', role: 'owner' },
+    ]
+    assert.equal(gymHasOwner(users, 'g1'), false)
+    assert.equal(gymHasOwner(users, 'g2'), true)
+    assert.equal(gymHasOwner(users, 'g3'), false)
+    assert.equal(gymHasOwner([], 'g1'), false)
   })
 })
 

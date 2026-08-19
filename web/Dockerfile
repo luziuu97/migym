@@ -12,6 +12,12 @@ WORKDIR /app
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm ci 2>/dev/null || npm install
 COPY frontend/ ./
+# Railway has no media volume; bake the same jsDelivr bases the mobile build uses.
+# Compose builds without these still serve ./media via the nginx mount.
+ARG VITE_IMG_BASE=https://cdn.jsdelivr.net/gh/hasaneyldrm/exercises-dataset@7455efae41b330c265e7cd4b78dfa848e7ce5ebd/images/
+ARG VITE_GIF_BASE=https://cdn.jsdelivr.net/gh/hasaneyldrm/exercises-dataset@7455efae41b330c265e7cd4b78dfa848e7ce5ebd/videos/
+ENV VITE_IMG_BASE=$VITE_IMG_BASE
+ENV VITE_GIF_BASE=$VITE_GIF_BASE
 RUN npm run build
 
 FROM nginx:alpine
@@ -38,6 +44,8 @@ COPY --from=build /app/dist /usr/share/nginx/html
 ENV NGINX_PORT=80
 ENV BACKEND=api
 ENV PORT=3000
+ENV BACKEND_PORT=3000
+ENV NGINX_RESOLVER=127.0.0.11
 
 # Probe the port nginx was actually told to listen on (NGINX_PORT is configurable, so a
 # hardcoded http://localhost/ breaks on any instance that changed it), and address it as

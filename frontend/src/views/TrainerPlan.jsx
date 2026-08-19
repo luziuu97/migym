@@ -32,7 +32,7 @@ export default function TrainerPlan() {
   const save = () => {
     setBusy(true)
     api('/api/trainer/plan', { method: 'PUT', body: JSON.stringify({ id, routines, week, customEx }) })
-      .then(() => { toast(t('Plan saved')); nav('/admin') })
+      .then(() => { toast(t('Plan saved')); nav('/gym') })
       .catch(e => toast(e.message || t('Failed to load')))
       .finally(() => setBusy(false))
   }
@@ -53,7 +53,7 @@ export default function TrainerPlan() {
 
   return <div className="narrow">
     <div className="hdr">
-      <button className="iconbtn" onClick={() => nav('/admin')} aria-label={t('Back')}><Icon name="chevronLeft" /></button>
+      <button className="iconbtn" onClick={() => nav('/gym')} aria-label={t('Back')}><Icon name="chevronLeft" /></button>
       <div style={{ flex: 1, marginLeft: 10 }}><h1>{t('Edit plan')}</h1><div className="sub">{name}</div></div>
     </div>
     <Button icon="clipboard" onClick={copyMine}>{t('Copy my plan to this member')}</Button>

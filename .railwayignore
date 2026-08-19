@@ -1,0 +1,12 @@
+**/node_modules
+frontend/android
+frontend/ios
+frontend/dist
+frontend/node_modules
+api/node_modules
+mcp/node_modules
+media
+data
+.git
+*.log
+.env

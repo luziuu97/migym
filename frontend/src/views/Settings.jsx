@@ -90,7 +90,8 @@ export default function Settings() {
         <Row icon="personCircle" iconTint="var(--grey)" title={user.name} subtitle={t('Signed in with passkey — data syncs to this profile.')} />
         {user.membership && user.membership.plan && <Row icon="clock" iconTint="var(--teal)" title={t('Membership')}
           subtitle={[t(user.membership.plan), user.membership.expiresOn && t('expires {0}', user.membership.expiresOn), user.membership.sessionsLeft != null && t('{0} sessions left', user.membership.sessionsLeft)].filter(Boolean).join(' · ')} />}
-        {(user.admin || user.role === 'owner' || user.role === 'trainer') && <Row icon="wrench" iconTint="var(--indigo)" title={t('Admin dashboard')} accessory="chevron" onClick={() => nav('/admin')} />}
+        {(user.role === 'owner' || user.role === 'trainer') && <Row icon="house" iconTint="var(--indigo)" title={user.gym?.name || t('Gym')} subtitle={t('Members, join code, plans')} accessory="chevron" onClick={() => nav('/gym')} />}
+        {user.admin && <Row icon="wrench" iconTint="var(--teal)" title={t('Platform')} subtitle={t('Create gyms, assign owners')} accessory="chevron" onClick={() => nav('/admin')} />}
         <Row icon="signOut" iconTint="var(--red)" title={t('Sign out')} danger onClick={() => confirmSheet({ title: t('Sign out?'), message: t('Your data is synced to your profile first, then cleared from this device.'), confirmText: t('Sign out'), danger: true, onConfirm: () => { signOut(); nav('/home') } })} />
         <Row icon="shield" iconTint="var(--red)" title={t('Sign out everywhere')} subtitle={t('Ends this profile’s sessions on all your devices.')} danger onClick={signOutEverywhere} />
       </> : webauthnOK() ? <>

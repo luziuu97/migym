@@ -12,7 +12,7 @@ import webpush from 'web-push';
 import { parseAppName, publicConfig } from './public-config.js';
 import {
   makeGym, findGymByJoinCode, migrateOrphans, publicUser, usersInGym, sameGym,
-  setGymOwner, gymsWithOwners,
+  setGymOwner, gymsWithOwners, gymHasOwner,
 } from './gyms.js';
 import { membershipActive, publicMembership, applyPaid, consumePackSession } from './membership.js';
 import { sanitizePlan } from './plan.js';
@@ -359,7 +359,10 @@ const routes = {
       invite = db.invites.find(i => i.code === c.code && !i.usedBy && !i.revoked);
       // Gym join codes are enough; personal invites remain optional extras.
     }
-    const user = { id: c.uid, name: c.name, created: new Date().toISOString(), gymId: gym.id, role: 'member' };
+    const user = {
+      id: c.uid, name: c.name, created: new Date().toISOString(), gymId: gym.id,
+      role: gymHasOwner(db.users, gym.id) ? 'member' : 'owner',
+    };
     if (invite) { user.invitedBy = invite.code; invite.usedBy = user.id; invite.usedAt = user.created; }
     db.users.push(user);
     db.creds.push({
@@ -622,7 +625,7 @@ const routes = {
   },
 
   'GET /api/admin/gyms': async (req, res) => {
-    const admin = requireAdmin(req, res); if (!admin) return;
+    const admin = requireStaff(req, res); if (!admin) return;
     const gyms = isAdmin(admin) ? db.gyms : db.gyms.filter(g => g.id === admin.gymId);
     json(res, 200, { gyms: gymsWithOwners(gyms, db.users) });
   },

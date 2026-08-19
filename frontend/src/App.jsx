@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { HashRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom'
+import { HashRouter, Routes, Route, Navigate, useNavigate, useLocation, useParams } from 'react-router-dom'
 import { useStore } from './store/useStore.js'
 import { useUI } from './store/useUI.js'
 import { bindUI } from './components/ui.jsx'
@@ -26,11 +26,17 @@ import History from './views/History.jsx'
 import Library from './views/Library.jsx'
 import Settings from './views/Settings.jsx'
 import Admin from './views/Admin.jsx'
+import Gym from './views/Gym.jsx'
 import TrainerPlan from './views/TrainerPlan.jsx'
 import MembershipLock from './views/MembershipLock.jsx'
 import { membershipActive } from './lib/membership.js'
 
 bindUI(useUI)   // lets the shared controls open sheets without importing the store at module scope
+
+function RedirectGymPlan() {
+  const { id } = useParams()
+  return <Navigate to={'/gym/plan/' + id} replace />
+}
 
 function applyPrefs(theme, accent) {
   const de = document.documentElement
@@ -82,8 +88,10 @@ function Shell() {
               <Route path="/history" element={<History />} />
               <Route path="/library" element={<Library />} />
               <Route path="/settings" element={<Settings />} />
-              <Route path="/admin" element={(user?.admin || user?.role === 'owner' || user?.role === 'trainer') ? <Admin /> : <Navigate to="/home" replace />} />
-              <Route path="/admin/plan/:id" element={(user?.admin || user?.role === 'owner' || user?.role === 'trainer') ? <TrainerPlan /> : <Navigate to="/home" replace />} />
+              <Route path="/gym" element={(user?.role === 'owner' || user?.role === 'trainer') ? <Gym /> : <Navigate to={user?.admin ? '/admin' : '/home'} replace />} />
+              <Route path="/gym/plan/:id" element={(user?.role === 'owner' || user?.role === 'trainer') ? <TrainerPlan /> : <Navigate to="/home" replace />} />
+              <Route path="/admin" element={user?.admin ? <Admin /> : <Navigate to={(user?.role === 'owner' || user?.role === 'trainer') ? '/gym' : '/home'} replace />} />
+              <Route path="/admin/plan/:id" element={<RedirectGymPlan />} />
               <Route path="*" element={<Navigate to="/home" replace />} />
             </Routes>
           )}
