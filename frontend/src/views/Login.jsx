@@ -1,6 +1,6 @@
 import { useStore } from '../store/useStore.js'
 import { useUI } from '../store/useUI.js'
-import { webauthnOK, passkeyLogin, registerAccount, loginAccount, BIO } from '../lib/api.js'
+import { webauthnOK, passkeyLogin, registerAccount, loginAccount, BIO, api } from '../lib/api.js'
 import { hasData } from '../store/useStore.js'
 import { t } from '../lib/i18n.js'
 import { DEMO } from '../lib/demo.js'
@@ -18,11 +18,28 @@ export function RegisterSheet({ close }) {
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
   const [code, setCode] = useState('')
+  const [gymHint, setGymHint] = useState('')
   const [busy, setBusy] = useState(false)
   const joinRequired = config?.join_required !== false
   const ref = useRef(null)
+  const prefilled = useRef('')
   useEffect(() => { setTimeout(() => ref.current?.focus(), 250) }, [])
   useEffect(() => { loadConfig() }, [loadConfig])
+  const lookup = async (raw) => {
+    const c = String(raw || '').trim()
+    if (c.length < 4) { setGymHint(''); return }
+    try {
+      const d = await api('/api/register/lookup', { method: 'POST', body: JSON.stringify({ code: c }) })
+      setGymHint(d.gymName || '')
+      if (d.kind === 'claim' && d.name) {
+        setName(n => (!n.trim() || n === prefilled.current) ? d.name : n)
+        prefilled.current = d.name
+      }
+    } catch (e) {
+      setGymHint('')
+      useUI.getState().toast(e.message || t('A gym code is required'))
+    }
+  }
   const go = async () => {
     const n = name.trim()
     if (!n) { useUI.getState().toast(t('Enter a name')); return }
@@ -42,19 +59,19 @@ export function RegisterSheet({ close }) {
   return <>
     <h3>{t('Create your profile')}</h3>
     <div className="muted small" style={{ marginBottom: 14 }}>{t('Pick a name, email and password. You can add a passkey later.')}</div>
-    <input ref={ref} className="input" placeholder={t('Your name')} maxLength={40} value={name} onChange={e => setName(e.target.value)} autoComplete="name" />
+    {joinRequired && <>
+      <input ref={ref} className="input" placeholder={t('Gym code')} maxLength={40} value={code}
+        onChange={e => setCode(e.target.value.toUpperCase())} onBlur={() => lookup(code)}
+        style={{ letterSpacing: '.08em', fontWeight: 600, textAlign: 'center' }} autoComplete="off" />
+      <div className="dim small" style={{ marginTop: 6, marginBottom: 10 }}>{gymHint || t('Enter the code your gym gave you.')}</div>
+    </>}
+    <input ref={joinRequired ? null : ref} className="input" placeholder={t('Your name')} maxLength={40} value={name} onChange={e => setName(e.target.value)} autoComplete="name" />
     <div style={{ height: 10 }} />
     <input className="input" type="email" placeholder={t('Email')} maxLength={120} value={email} onChange={e => setEmail(e.target.value)} autoComplete="email" />
     <div style={{ height: 10 }} />
     <input className="input" type="password" placeholder={t('Password')} maxLength={200} value={password} onChange={e => setPassword(e.target.value)} autoComplete="new-password" />
     <div style={{ height: 10 }} />
     <input className="input" type="password" placeholder={t('Confirm password')} maxLength={200} value={confirm} onChange={e => setConfirm(e.target.value)} autoComplete="new-password" />
-    {joinRequired && <>
-      <div style={{ height: 10 }} />
-      <input className="input" placeholder={t('Gym code')} maxLength={24} value={code}
-        onChange={e => setCode(e.target.value.toUpperCase())} style={{ letterSpacing: '.08em', fontWeight: 600, textAlign: 'center' }} autoComplete="off" />
-      <div className="dim small" style={{ marginTop: 6 }}>{t('Enter the code your gym gave you.')}</div>
-    </>}
     <div style={{ height: 12 }} />
     <Button variant="primary" onClick={go} disabled={busy}>{t('Create account')}</Button>
   </>

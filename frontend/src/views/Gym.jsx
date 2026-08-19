@@ -53,6 +53,7 @@ export default function Gym() {
       <button className="iconbtn" onClick={() => nav('/settings')} aria-label={t('Back')}><Icon name="chevronLeft" /></button>
       <div style={{ flex: 1, marginLeft: 8 }}><h1 style={{ margin: 0 }}>{title}</h1>
         <div className="sub">{users ? t('{0} users · {1} active this week', users.length, activeCount) : t('Loading…')}</div></div>
+      <button className="iconbtn" onClick={() => openSheet(close => <AddMemberSheet gym={gym} onCreated={loadUsers} close={close} />)} aria-label={t('Add member')}><Icon name="plus" /></button>
       <button className="iconbtn" onClick={() => { loadUsers(); loadInvites(); loadGym(); loadAdherence() }} aria-label={t('refresh')}>↻</button>
     </div>
 
@@ -76,7 +77,7 @@ export default function Gym() {
             <div className="small" style={{ fontWeight: 600 }}>{r.name} {r.live && <Icon name="dot" style={{ fontSize: 9, color: 'var(--green)' }} />}</div>
             <div className="dim" style={{ fontSize: '.72rem' }}>{t('{0}/{1} sessions this week', r.trained, r.planned)}{r.lastWorkout ? ' · ' + fmtDate(r.lastWorkout) : ''}</div>
           </div>
-          {r.trainedToday ? <span className="tag acc">{t('today')}</span> : r.membership && r.membership.status !== 'active' ? <span className="tag" style={{ color: 'var(--red)' }}>{t('past due')}</span> : null}
+          {r.claimCode ? <span className="tag">{t('not signed up')}</span> : r.trainedToday ? <span className="tag acc">{t('today')}</span> : r.membership && r.membership.status !== 'active' ? <span className="tag" style={{ color: 'var(--red)' }}>{t('past due')}</span> : null}
         </div>)}
       </div>
     </div>}
@@ -95,8 +96,8 @@ export default function Gym() {
     <h4 className="sec">{t('Users')}</h4>
     <div className="list">
       {(users || []).map(u => <div key={u.id} className="item" onClick={() => openUser(u.id)} style={u.disabled ? { opacity: .55 } : null}>
-        <div className="grow"><div className="tt">{u.live && <Icon name="dot" style={{ fontSize: 9, color: 'var(--green)', display: 'inline-block', marginRight: 5 }} />}{u.name} {u.role && u.role !== 'member' && <span className="tag acc" style={{ marginLeft: 4 }}>{t(u.role)}</span>}{u.admin && <span className="tag acc" style={{ marginLeft: 4 }}>{t('admin')}</span>}{u.role === 'member' && u.membership && u.membership.status !== 'active' && <span className="tag" style={{ marginLeft: 4, color: 'var(--red)' }}>{t('past due')}</span>}{u.disabled && <span className="tag" style={{ marginLeft: 4, color: 'var(--red)' }}>{t('off')}</span>}</div>
-          <div className="ss">{u.live ? t('training now · {0}', u.live.name) : t('{0} workouts', u.workouts) + (u.lastWorkout ? t(' · last {0}', fmtDate(u.lastWorkout)) : '') + t(' · synced {0}', rel(u.lastSync))}</div></div>
+        <div className="grow"><div className="tt">{u.live && <Icon name="dot" style={{ fontSize: 9, color: 'var(--green)', display: 'inline-block', marginRight: 5 }} />}{u.name} {u.claimCode && <span className="tag" style={{ marginLeft: 4 }}>{t('not signed up')}</span>}{u.role && u.role !== 'member' && <span className="tag acc" style={{ marginLeft: 4 }}>{t(u.role)}</span>}{u.admin && <span className="tag acc" style={{ marginLeft: 4 }}>{t('admin')}</span>}{u.role === 'member' && !u.claimCode && u.membership && u.membership.status !== 'active' && <span className="tag" style={{ marginLeft: 4, color: 'var(--red)' }}>{t('past due')}</span>}{u.disabled && <span className="tag" style={{ marginLeft: 4, color: 'var(--red)' }}>{t('off')}</span>}</div>
+          <div className="ss">{u.claimCode ? t('not signed up') + ' · ' + u.claimCode : u.live ? t('training now · {0}', u.live.name) : t('{0} workouts', u.workouts) + (u.lastWorkout ? t(' · last {0}', fmtDate(u.lastWorkout)) : '') + t(' · synced {0}', rel(u.lastSync))}</div></div>
         <button className="iconbtn" title={t('Set routines')} onClick={e => { e.stopPropagation(); nav('/gym/plan/' + u.id) }}><Icon name="clipboard" /></button>
         <button className="iconbtn" title={t('Copy my plan to this member')} onClick={e => applyMyPlan(u.id, e)}><Icon name="sparkles" /></button>
         {u.hasPush && <Icon name="bell" title={t('push enabled')} style={{ fontSize: 15, color: 'var(--label-3)' }} />}<Icon name="chevronRight" className="chev" />
@@ -104,6 +105,45 @@ export default function Gym() {
       {users && !users.length && <div className="empty">{t('No users yet.')}</div>}
     </div>
   </div>
+}
+
+function AddMemberSheet({ gym, onCreated, close }) {
+  const toast = useUI(s => s.toast)
+  const [name, setName] = useState('')
+  const [suffix, setSuffix] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [done, setDone] = useState(null)
+  const save = async () => {
+    const n = name.trim()
+    if (!n) { toast(t('Enter a name')); return }
+    setBusy(true)
+    try {
+      const out = await api('/api/admin/users/pending', { method: 'POST', body: JSON.stringify({ name: n, suffix: suffix.trim() || undefined, gymId: gym && gym.id }) })
+      setDone(out.claimCode)
+      navigator.clipboard?.writeText(out.claimCode).catch(() => {})
+      toast(t('Member added'))
+      onCreated()
+    } catch (e) { toast(e.message || t('Failed to load')) }
+    finally { setBusy(false) }
+  }
+  if (done) return <>
+    <h3>{t('Claim code')}</h3>
+    <div className="muted small" style={{ marginBottom: 12 }}>{t('This member has not signed up yet.')}</div>
+    <div style={{ fontFamily: 'ui-monospace,monospace', fontWeight: 600, letterSpacing: '.1em', fontSize: '1.1rem', textAlign: 'center' }}
+      onClick={() => { navigator.clipboard?.writeText(done).catch(() => {}); toast(t('Copied {0}', done)) }}>{done}</div>
+    <div style={{ height: 14 }} />
+    <Button variant="primary" onClick={close}>{t('Done')}</Button>
+  </>
+  return <>
+    <h3>{t('Add member')}</h3>
+    <input className="input" placeholder={t('Your name')} maxLength={40} value={name} onChange={e => setName(e.target.value)} />
+    <div style={{ height: 10 }} />
+    <input className="input" placeholder={t('Custom code (optional)')} maxLength={12} value={suffix}
+      onChange={e => setSuffix(e.target.value.toUpperCase())} style={{ letterSpacing: '.08em', fontWeight: 600, textAlign: 'center' }} autoComplete="off" />
+    <div className="dim small" style={{ marginTop: 6 }}>{t('Leave blank for a random code.')}</div>
+    <div style={{ height: 12 }} />
+    <Button variant="primary" onClick={save} disabled={busy}>{t('Add member')}</Button>
+  </>
 }
 
 function JoinCodeCard({ gym, onChanged, canEdit }) {

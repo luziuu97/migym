@@ -1,5 +1,6 @@
 import crypto from 'node:crypto'
-import { findGymByJoinCode, gymHasOwner, publicUser } from './gyms.js'
+import { gymHasOwner, publicUser } from './gyms.js'
+import { resolveRegisterCode } from './claim.js'
 import { hashPassword, verifyPassword, normalizeEmail, isValidEmail, passwordError } from './password.js'
 
 const fail = (status, error) => ({ ok: false, status, error })
@@ -23,13 +24,25 @@ export async function registerPassword(db, body) {
   if (emailTaken(db, em.email)) return fail(409, 'email in use')
   const pwErr = passwordError(body?.password)
   if (pwErr) return fail(400, pwErr)
-  const gym = findGymByJoinCode(db.gyms, body?.code)
-  if (!gym) return fail(403, 'a valid gym code is required')
+  const resolved = resolveRegisterCode(db, body?.code)
+  if (!resolved.ok) return resolved
+  const password = await hashPassword(body.password)
+  if (resolved.kind === 'claim') {
+    const user = resolved.user
+    user.name = name
+    user.email = em.email
+    user.password = password
+    user.invitedBy = user.claimCode
+    user.claimedAt = new Date().toISOString()
+    delete user.claimCode
+    return { ok: true, user }
+  }
+  const gym = resolved.gym
   const user = {
     id: crypto.randomBytes(12).toString('base64url'),
     name,
     email: em.email,
-    password: await hashPassword(body.password),
+    password,
     created: new Date().toISOString(),
     gymId: gym.id,
     role: gymHasOwner(db.users, gym.id) ? 'member' : 'owner',

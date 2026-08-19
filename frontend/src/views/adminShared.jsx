@@ -23,6 +23,44 @@ export const dur = ms => {
   return m < 60 ? m + 'm' : Math.floor(m / 60) + 'h' + (m % 60) + 'm'
 }
 
+function ClaimCodeCard({ user, onChanged }) {
+  const toast = useUI(s => s.toast)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [busy, setBusy] = useState(false)
+  const copy = () => { navigator.clipboard?.writeText(user.claimCode).catch(() => {}); toast(t('Copied {0}', user.claimCode)) }
+  const save = async (suffix) => {
+    setBusy(true)
+    try {
+      const { claimCode } = await api('/api/admin/user/claim-code', { method: 'POST', body: JSON.stringify({ id: user.id, suffix }) })
+      toast(t('Code regenerated'))
+      setEditing(false)
+      onChanged()
+      navigator.clipboard?.writeText(claimCode).catch(() => {})
+    } catch (e) { toast(e.message) }
+    finally { setBusy(false) }
+  }
+  return <div className="card" style={{ margin: '10px 0 12px', textAlign: 'left' }}>
+    <h4 className="sec" style={{ marginTop: 0 }}>{t('Claim code')}</h4>
+    <div className="dim small" style={{ marginBottom: 8 }}>{t('This member has not signed up yet.')}</div>
+    {editing ? <>
+      <input className="input" value={draft} maxLength={12} onChange={e => setDraft(e.target.value.toUpperCase())}
+        placeholder={t('Custom code (optional)')} style={{ letterSpacing: '.06em', fontWeight: 600, textAlign: 'center' }} />
+      <div className="dim small" style={{ marginTop: 6 }}>{t('Leave blank for a random code.')}</div>
+      <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+        <Button variant="primary" size="sm" disabled={busy} onClick={() => save(draft)}>{t('Save code')}</Button>
+        <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>{t('Cancel')}</Button>
+      </div>
+    </> : <>
+      <div style={{ fontFamily: 'ui-monospace,monospace', fontWeight: 600, letterSpacing: '.1em', fontSize: '1.05rem' }} onClick={copy}>{user.claimCode}</div>
+      <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+        <Button size="sm" onClick={() => save('')}>{t('New random code')}</Button>
+        <Button size="sm" onClick={() => { setDraft(''); setEditing(true) }}>{t('Set custom code')}</Button>
+      </div>
+    </>}
+  </div>
+}
+
 function MembershipEditor({ user, onChanged }) {
   const toast = useUI(s => s.toast)
   const [plan, setPlan] = useState((user.membership && user.membership.plan) || 'monthly')
@@ -97,7 +135,8 @@ export function UserDetail({ id, onChanged, close, canBill, canRole }) {
     <div className="row" style={{ gap: 6, flexWrap: 'wrap', margin: '8px 0 12px' }}>
       {u.role && u.role !== 'member' && <span className="tag acc">{t(u.role)}</span>}
       {u.admin && <span className="tag acc">{t('admin')}</span>}
-      {u.membership && u.membership.status !== 'active' && u.role === 'member' && <span className="tag" style={{ color: 'var(--red)' }}>{t('past due')}</span>}
+      {u.claimCode && <span className="tag">{t('not signed up')}</span>}
+      {u.membership && u.membership.status !== 'active' && u.role === 'member' && !u.claimCode && <span className="tag" style={{ color: 'var(--red)' }}>{t('past due')}</span>}
       {u.disabled && <span className="tag" style={{ color: 'var(--red)' }}>{t('disabled')}</span>}
       {u.invitedBy && <span className="tag">{t('invite {0}', u.invitedBy)}</span>}
       <span className="tag">{t('joined {0}', u.created ? fmtDate(u.created.slice(0, 10)) : '—')}</span>
@@ -109,7 +148,8 @@ export function UserDetail({ id, onChanged, close, canBill, canRole }) {
       <div className="tile"><div className="l">{t('Last sync')}</div><div className="v" style={{ fontSize: '.95rem' }}>{rel(d.lastSync)}</div></div>
     </div>
     {canBill && <SetPasswordCard user={u} onChanged={() => { onChanged(); api('/api/admin/user?id=' + encodeURIComponent(u.id)).then(setD) }} />}
-    {canRole && u.role !== 'owner' && <div style={{ margin: '8px 0', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+    {u.claimCode && <ClaimCodeCard user={u} onChanged={() => { onChanged(); api('/api/admin/user?id=' + encodeURIComponent(u.id)).then(setD) }} />}
+    {canRole && !u.claimCode && u.role !== 'owner' && <div style={{ margin: '8px 0', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
       <Button size="sm" onClick={() => api('/api/admin/user/role', { method: 'POST', body: JSON.stringify({ id: u.id, role: u.role === 'trainer' ? 'member' : 'trainer' }) }).then(() => { toast(t('Role updated')); onChanged(); api('/api/admin/user?id=' + encodeURIComponent(u.id)).then(setD) }).catch(e => toast(e.message))}>
         {u.role === 'trainer' ? t('Make member') : t('Make trainer')}
       </Button>

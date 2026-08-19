@@ -714,4 +714,13 @@ export default {
   "No email yet — required for password login.": "No email yet — required for password login.",
   "Email for login": "Email for login",
   "Temporary password": "Temporary password",
+"not signed up": "not signed up",
+  "Add member": "Add member",
+  "Custom code (optional)": "Custom code (optional)",
+  "Leave blank for a random code.": "Leave blank for a random code.",
+  "Claim code": "Claim code",
+  "Member added": "Member added",
+  "Code regenerated": "Code regenerated",
+  "Set custom code": "Set custom code",
+  "This member has not signed up yet.": "This member has not signed up yet.",
 }

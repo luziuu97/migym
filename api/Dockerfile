@@ -18,7 +18,7 @@ LABEL maintainer="Duarte Santos https://github.com/DuarteSantos8" \
 WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install --omit=dev && npm cache clean --force
-COPY server.js public-config.js gyms.js membership.js plan.js adherence.js auth.js password.js ./
+COPY server.js public-config.js gyms.js membership.js plan.js adherence.js auth.js password.js claim.js ./
 
 ENV NODE_ENV=production
 ENV PORT=3000

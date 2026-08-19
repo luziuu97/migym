@@ -15,6 +15,7 @@ import {
   setGymOwner, gymsWithOwners, applyJoinCode,
 } from './gyms.js';
 import { registerPassword, loginPassword, setOwnPassword, adminSetPassword, authPublic } from './auth.js';
+import { createPendingMember, setClaimCode, resolveRegisterCode, publicLookup } from './claim.js';
 import { membershipActive, publicMembership, applyPaid, consumePackSession } from './membership.js';
 import { sanitizePlan } from './plan.js';
 import { memberAdherence, todayISO as adherenceToday } from './adherence.js';
@@ -321,13 +322,22 @@ const routes = {
     const out = await registerPassword(db, body);
     if (!out.ok) return json(res, out.status, { error: out.error });
     const user = out.user;
-    if (INVITE_ONLY) {
+    if (INVITE_ONLY && !user.invitedBy) {
       const code = String(body.code || '').trim().toUpperCase();
       const invite = db.invites.find(i => i.code === code && !i.usedBy && !i.revoked);
       if (invite) { user.invitedBy = invite.code; invite.usedBy = user.id; invite.usedAt = user.created; }
     }
     saveDb();
     json(res, 200, { user: sessionUser(user) }, { 'Set-Cookie': sessionCookie(user) });
+  },
+
+  'POST /api/register/lookup': async (req, res) => {
+    const body = await readBody(req);
+    const out = publicLookup(resolveRegisterCode(db, body && body.code));
+    if (!out.ok) return json(res, out.status, { error: out.error });
+    const payload = { kind: out.kind, gymName: out.gymName };
+    if (out.kind === 'claim') payload.name = out.name;
+    json(res, 200, payload);
   },
 
   // New profiles use email+password. These stay so old clients get a clear error.
@@ -556,6 +566,7 @@ const routes = {
         id: u.id, name: u.name, created: u.created || null, email: u.email || null,
         hasPassword: !!u.password, hasPasskey: db.creds.some(c => c.userId === u.id),
         disabled: !!u.disabled, admin: isAdmin(u), invitedBy: u.invitedBy || null,
+        claimCode: u.claimCode || null, claimedAt: u.claimedAt || null,
         workouts: workouts.length,
         lastWorkout: last ? last.d : null,
         lastSync: S._ts || null,
@@ -576,13 +587,33 @@ const routes = {
     if (!u || !canAccessUser(admin, u)) return json(res, 404, { error: 'no such user' });
     const S = readState(u.id) || {};
     json(res, 200, {
-      user: { id: u.id, name: u.name, created: u.created || null, email: u.email || null, hasPassword: !!u.password, hasPasskey: db.creds.some(c => c.userId === u.id), disabled: !!u.disabled, admin: isAdmin(u), invitedBy: u.invitedBy || null, role: u.role || 'member', membership: publicMembership({ ...u, admin: isAdmin(u) }) },
+      user: { id: u.id, name: u.name, created: u.created || null, email: u.email || null, hasPassword: !!u.password, hasPasskey: db.creds.some(c => c.userId === u.id), disabled: !!u.disabled, admin: isAdmin(u), invitedBy: u.invitedBy || null, claimCode: u.claimCode || null, claimedAt: u.claimedAt || null, role: u.role || 'member', membership: publicMembership({ ...u, admin: isAdmin(u) }) },
       unit: S.unit || 'kg',
       lastSync: S._ts || null,
       routines: (S.routines || []).map(r => ({ id: r.id, name: r.name, emoji: r.emoji, count: (r.ex || []).length })),
       bodyweight: S.bodyweight || [],
       workouts: (S.workouts || []).slice().reverse()   // newest first for display
     });
+  },
+
+  'POST /api/admin/users/pending': async (req, res) => {
+    const staff = requireStaff(req, res); if (!staff) return;
+    const body = await readBody(req);
+    const out = createPendingMember(db, { ...staff, admin: isAdmin(staff) }, body);
+    if (!out.ok) return json(res, out.status, { error: out.error });
+    saveDb();
+    json(res, 200, { user: { id: out.user.id, name: out.user.name, role: out.user.role, gymId: out.user.gymId, claimCode: out.claimCode }, claimCode: out.claimCode });
+  },
+
+  'POST /api/admin/user/claim-code': async (req, res) => {
+    const staff = requireStaff(req, res); if (!staff) return;
+    const body = await readBody(req);
+    const u = db.users.find(x => x.id === body.id);
+    if (!u || !canAccessUser(staff, u)) return json(res, 404, { error: 'no such user' });
+    const out = setClaimCode(db, u, body);
+    if (!out.ok) return json(res, out.status, { error: out.error });
+    saveDb();
+    json(res, 200, { claimCode: out.claimCode });
   },
 
   'POST /api/admin/user/disable': async (req, res) => {
@@ -762,6 +793,7 @@ const routes = {
       return {
         id: u.id, name: u.name, role: u.role || 'member',
         membership: publicMembership({ ...u, admin: isAdmin(u) }),
+        claimCode: u.claimCode || null,
         live: livePresence(u.id),
         ...a,
       };
